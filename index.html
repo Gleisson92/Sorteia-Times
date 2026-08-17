@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Sorteio Família Clube</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useMemo } = React;
+
+// ---------- ícones simples (sem dependência externa) ----------
+function Icon({ children, size = 16, color }) {
+  return (
+    <span style={{ fontSize: size, lineHeight: 1, display: "inline-flex", color: color || "currentColor" }}>
+      {children}
+    </span>
+  );
+}
+function Star({ size, color }) {
+  return <span style={{ fontSize: size, color, lineHeight: 1 }}>★</span>;
+}
+const Plus = ({ size, color }) => <Icon size={size} color={color}>+</Icon>;
+const Trash2 = ({ size, color }) => <Icon size={size} color={color}>🗑</Icon>;
+const Shuffle = ({ size, color }) => <Icon size={size} color={color}>🔀</Icon>;
+const Download = ({ size, color }) => <Icon size={size} color={color}>⬇</Icon>;
+const Users = ({ size, color }) => <Icon size={size} color={color}>👥</Icon>;
+const ListChecks = ({ size, color }) => <Icon size={size} color={color}>📋</Icon>;
+const RotateCcw = ({ size, color }) => <Icon size={size} color={color}>↺</Icon>;
+const Check = ({ size, color }) => <Icon size={size} color={color}>✓</Icon>;
+const CheckCheck = ({ size, color }) => <Icon size={size} color={color}>✓✓</Icon>;
+const SlidersHorizontal = ({ size, color }) => <Icon size={size} color={color}>⚙</Icon>;
+const ArrowLeft = ({ size, color }) => <Icon size={size} color={color}>←</Icon>;
+
+// ---------- armazenamento local (substitui o storage do artefato) ----------
+window.storage = {
+  async get(key) {
+    const v = localStorage.getItem("pelada:" + key);
+    if (v === null) throw new Error("not found");
+    return { value: v };
+  },
+  async set(key, value) {
+    localStorage.setItem("pelada:" + key, value);
+    return { value };
+  },
+};
+
+
+const FIXED_KEY = "fixedPlayers";
+const AVULSOS_KEY = "avulsos";
+
+// ---------- helpers ----------
+function normalize(str) {
+  return str
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function drawRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function sortear(list) {
+  const shuffled = shuffle(list);
+  const sorted = [...shuffled].sort((a, b) => b.stars - a.stars);
+  const numTeams = Math.floor(sorted.length / 5);
+  const totalAssigned = numTeams * 5;
+  const forTeams = sorted.slice(0, totalAssigned);
+  const reservas = sorted.slice(totalAssigned);
+
+  const teams = Array.from({ length: numTeams }, () => []);
+  let round = 0;
+  let idx = 0;
+  while (idx < forTeams.length) {
+    const order = [...Array(numTeams).keys()];
+    const teamOrder = round % 2 === 0 ? order : order.reverse();
+    for (const t of teamOrder) {
+      if (idx >= forTeams.length) break;
+      teams[t].push(forTeams[idx]);
+      idx++;
+    }
+    round++;
+  }
+  return { teams, reservas };
+}
+
+// ---------- small UI atoms ----------
+function StarPicker({ value, onChange, readOnly, size = 20 }) {
+  return (
+    <div style={{ display: "flex", gap: 2 }}>
+      {[1, 2, 3, 4].map((n) => (
+        <button
+          key={n}
+          type="button"
+          disabled={readOnly}
+          onClick={() => onChange && onChange(n)}
+          style={{ background: "none", border: "none", padding: 2, cursor: readOnly ? "default" : "pointer", lineHeight: 0 }}
+          aria-label={`${n} estrela${n > 1 ? "s" : ""}`}
+        >
+          <Star size={size} color={n <= value ? "#E7B740" : "#D8D4C8"} fill={n <= value ? "#E7B740" : "none"} strokeWidth={1.5} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CheckToggle({ checked, onChange }) {
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      aria-pressed={checked}
+      aria-label={checked ? "Confirmado" : "Não confirmado"}
+      style={{
+        width: 26,
+        height: 26,
+        borderRadius: 8,
+        border: checked ? "none" : "2px solid #DEDACB",
+        background: checked ? "#1F5C3F" : "#FFFFFF",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        flexShrink: 0,
+      }}
+    >
+      {checked && <Check size={16} color="#FFFFFF" strokeWidth={3} />}
+    </button>
+  );
+}
+
+// ---------- main app ----------
+function App() {
+  const [tab, setTab] = useState("jogadores");
+  const [loading, setLoading] = useState(true);
+  const [fixedPlayers, setFixedPlayers] = useState([]);
+  const [avulsos, setAvulsos] = useState([]);
+
+  const [jogView, setJogView] = useState("lista"); // 'lista' | 'classificar' | 'novoMensalista'
+  const [newMensalistaName, setNewMensalistaName] = useState("");
+  const [newAvulsoName, setNewAvulsoName] = useState("");
+
+  const [result, setResult] = useState(null);
+  const [imageUrl, setImageUrl] = useState(null);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(FIXED_KEY, false);
+        if (res && res.value) {
+          const parsed = JSON.parse(res.value).map((p) => ({ confirmado: true, ...p }));
+          setFixedPlayers(parsed);
+        }
+      } catch (e) {
+        /* nothing saved yet */
+      }
+      try {
+        const res2 = await window.storage.get(AVULSOS_KEY, false);
+        if (res2 && res2.value) setAvulsos(JSON.parse(res2.value));
+      } catch (e) {
+        /* nothing saved yet */
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const flash = (msg) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(""), 2500);
+  };
+
+  const persistFixed = useCallback(async (list) => {
+    try {
+      await window.storage.set(FIXED_KEY, JSON.stringify(list), false);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+  const persistAvulsos = useCallback(async (list) => {
+    try {
+      await window.storage.set(AVULSOS_KEY, JSON.stringify(list), false);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  function updateFixed(next) {
+    setFixedPlayers(next);
+    persistFixed(next);
+  }
+  function updateAvulsos(next) {
+    setAvulsos(next);
+    persistAvulsos(next);
+  }
+
+  // ---- mensalistas ----
+  function addMensalista() {
+    const name = newMensalistaName.trim();
+    if (!name) return;
+    if (fixedPlayers.some((p) => normalize(p.name) === normalize(name))) {
+      flash("Esse mensalista já está cadastrado.");
+      return;
+    }
+    updateFixed([...fixedPlayers, { id: uid(), name, stars: 2, confirmado: true }]);
+    setNewMensalistaName("");
+    setJogView("lista");
+  }
+  function removeMensalista(id) {
+    updateFixed(fixedPlayers.filter((p) => p.id !== id));
+  }
+  function toggleMensalista(id) {
+    updateFixed(fixedPlayers.map((p) => (p.id === id ? { ...p, confirmado: !p.confirmado } : p)));
+  }
+  function todosConfirmados() {
+    updateFixed(fixedPlayers.map((p) => ({ ...p, confirmado: true })));
+  }
+  function setMensalistaStars(id, stars) {
+    updateFixed(fixedPlayers.map((p) => (p.id === id ? { ...p, stars } : p)));
+  }
+
+  // ---- avulsos ----
+  function addAvulso() {
+    const name = newAvulsoName.trim();
+    if (!name) return;
+    if (avulsos.some((p) => normalize(p.name) === normalize(name))) {
+      flash("Esse avulso já está na lista.");
+      return;
+    }
+    updateAvulsos([...avulsos, { id: uid(), name, stars: 2, confirmado: true }]);
+    setNewAvulsoName("");
+  }
+  function removeAvulso(id) {
+    updateAvulsos(avulsos.filter((p) => p.id !== id));
+  }
+  function toggleAvulso(id) {
+    updateAvulsos(avulsos.map((p) => (p.id === id ? { ...p, confirmado: !p.confirmado } : p)));
+  }
+  function setAvulsoStars(id, stars) {
+    updateAvulsos(avulsos.map((p) => (p.id === id ? { ...p, stars } : p)));
+  }
+  function limparAvulsos() {
+    if (avulsos.length === 0) return;
+    if (window.confirm("Limpar todos os avulsos da semana? Essa ação não pode ser desfeita.")) {
+      updateAvulsos([]);
+    }
+  }
+
+  // ---- sorteio ----
+  const confirmados = useMemo(() => {
+    const m = fixedPlayers.filter((p) => p.confirmado).map((p) => ({ id: p.id, name: p.name, stars: p.stars, isAvulso: false }));
+    const a = avulsos.filter((p) => p.confirmado).map((p) => ({ id: p.id, name: p.name, stars: p.stars, isAvulso: true }));
+    return [...m, ...a];
+  }, [fixedPlayers, avulsos]);
+
+  function generateImageDataUrl({ teams, reservas }) {
+    const width = 720;
+    const padding = 36;
+    const rowH = 46;
+    const cardHeaderH = 44;
+    const cardPad = 18;
+    const cardGap = 22;
+
+    let y = 0;
+    const headerH = 128;
+    y += headerH;
+
+    const teamCardHeights = teams.map((t) => cardHeaderH + cardPad * 2 + t.length * rowH);
+    const teamsTotalH = teamCardHeights.reduce((a, b) => a + b, 0) + cardGap * teams.length;
+    y += teamsTotalH;
+
+    let reservasH = 0;
+    if (reservas.length > 0) {
+      reservasH = cardHeaderH + cardPad * 2 + reservas.length * rowH + cardGap;
+      y += reservasH;
+    }
+    const footerH = 50;
+    y += footerH;
+
+    const height = y + padding;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0, "#0F2E22");
+    grad.addColorStop(1, "#1F5C3F");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = "rgba(255,255,255,0.03)";
+    for (let sx = 0; sx < width; sx += 80) ctx.fillRect(sx, 0, 40, height);
+
+    let cy = padding;
+
+    ctx.fillStyle = "#E7B740";
+    ctx.font = "bold 34px Arial Black, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("SORTEIO FAMILIA CLUBE", width / 2, cy + 42);
+
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.font = "16px Arial, sans-serif";
+    const dateStr = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+    ctx.fillText(dateStr, width / 2, cy + 74);
+
+    cy += headerH;
+
+    teams.forEach((team, ti) => {
+      const cardH = teamCardHeights[ti];
+      const x = padding;
+      const w = width - padding * 2;
+
+      ctx.fillStyle = "#F7F5EE";
+      drawRoundRect(ctx, x, cy, w, cardH, 14);
+      ctx.fill();
+
+      ctx.fillStyle = "#E7B740";
+      drawRoundRect(ctx, x, cy, w, cardHeaderH, 14);
+      ctx.fill();
+      ctx.fillRect(x, cy + cardHeaderH - 14, w, 14);
+
+      ctx.fillStyle = "#16241D";
+      ctx.font = "bold 22px Arial Black, Arial, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(`TIME ${ti + 1}`, x + 20, cy + 30);
+
+      let ry = cy + cardHeaderH + cardPad;
+      team.forEach((p, pi) => {
+        const cx = x + 34;
+        const rowMidY = ry + rowH / 2 - 6;
+
+        ctx.beginPath();
+        ctx.arc(cx, rowMidY + 2, 16, 0, Math.PI * 2);
+        ctx.fillStyle = "#1F5C3F";
+        ctx.fill();
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "bold 14px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(String(pi + 1), cx, rowMidY + 7);
+
+        ctx.fillStyle = "#16241D";
+        ctx.font = "600 19px Arial, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(p.name, cx + 30, rowMidY + 6);
+
+        ry += rowH;
+      });
+
+      cy += cardH + cardGap;
+    });
+
+    if (reservas.length > 0) {
+      const x = padding;
+      const w = width - padding * 2;
+      const cardH = reservasH - cardGap;
+
+      ctx.fillStyle = "#E4E1D6";
+      drawRoundRect(ctx, x, cy, w, cardH, 14);
+      ctx.fill();
+
+      ctx.fillStyle = "#8A8672";
+      drawRoundRect(ctx, x, cy, w, cardHeaderH, 14);
+      ctx.fill();
+      ctx.fillRect(x, cy + cardHeaderH - 14, w, 14);
+
+      ctx.fillStyle = "#FFFFFF";
+      ctx.font = "bold 20px Arial Black, Arial, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("RESERVAS", x + 20, cy + 29);
+
+      let ry = cy + cardHeaderH + cardPad;
+      reservas.forEach((p) => {
+        ctx.fillStyle = "#3A382E";
+        ctx.font = "600 18px Arial, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(p.name, x + 24, ry + rowH / 2 + 2);
+        ry += rowH;
+      });
+
+      cy += reservasH;
+    }
+
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.font = "13px Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("gerado automaticamente • sorteio equilibrado por estrelas", width / 2, cy + 20);
+
+    return canvas.toDataURL("image/png");
+  }
+
+  function fazerSorteio() {
+    if (confirmados.length < 5) {
+      flash("É preciso de pelo menos 5 jogadores confirmados para formar um time.");
+      return;
+    }
+    const res = sortear(confirmados);
+    setResult(res);
+    setImageUrl(generateImageDataUrl(res));
+  }
+  function sortearNovamente() {
+    const res = sortear(confirmados);
+    setResult(res);
+    setImageUrl(generateImageDataUrl(res));
+  }
+  function baixarImagem() {
+    if (!imageUrl) return;
+    const a = document.createElement("a");
+    a.href = imageUrl;
+    a.download = `sorteio-familia-clube-${new Date().toISOString().slice(0, 10)}.png`;
+    a.click();
+  }
+
+  const sortedFixed = [...fixedPlayers].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const sortedAvulsos = [...avulsos].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "linear-gradient(180deg, #0F2E22 0%, #1F5C3F 340px, #F5F3EC 340px, #F5F3EC 100%)",
+        fontFamily: "'Work Sans', sans-serif",
+        color: "#16241D",
+        paddingBottom: 60,
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Work+Sans:wght@400;500;600;700&display=swap');
+        .bebas { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+      `}</style>
+
+      <div style={{ padding: "40px 20px 24px", textAlign: "center" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#E7B740" }} />
+          <span style={{ color: "#E7B740", fontSize: 13, letterSpacing: 3, fontWeight: 600 }}>SEM PANELA</span>
+        </div>
+        <h1 className="bebas" style={{ color: "#FFFFFF", fontSize: 48, margin: 0, lineHeight: 1 }}>
+          SORTEIO FAMILIA CLUBE
+        </h1>
+        <p style={{ color: "rgba(255,255,255,0.7)", marginTop: 8, fontSize: 15 }}>
+          Marque os confirmados da semana e sorteie times equilibrados.
+        </p>
+      </div>
+
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "0 20px" }}>
+        <div
+          style={{
+            display: "flex",
+            background: "#FFFFFF",
+            borderRadius: 14,
+            padding: 5,
+            boxShadow: "0 10px 30px rgba(15,46,34,0.15)",
+            marginBottom: 24,
+          }}
+        >
+          {[
+            { key: "jogadores", label: "Jogadores", icon: Users },
+            { key: "sorteio", label: "Sorteio", icon: ListChecks },
+          ].map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => {
+                setTab(key);
+                setJogView("lista");
+              }}
+              style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "12px 0",
+                borderRadius: 10,
+                border: "none",
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: 15,
+                background: tab === key ? "#1F5C3F" : "transparent",
+                color: tab === key ? "#FFFFFF" : "#6E6B5D",
+              }}
+            >
+              <Icon size={17} />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {notice && (
+          <div
+            style={{
+              background: "#FFF3D6",
+              border: "1px solid #E7B740",
+              color: "#7A5A0A",
+              padding: "10px 14px",
+              borderRadius: 10,
+              fontSize: 14,
+              marginBottom: 16,
+            }}
+          >
+            {notice}
+          </div>
+        )}
+
+        {loading ? (
+          <p style={{ textAlign: "center", color: "#6E6B5D" }}>Carregando...</p>
+        ) : tab === "jogadores" ? (
+          <JogadoresTab
+            jogView={jogView}
+            setJogView={setJogView}
+            sortedFixed={sortedFixed}
+            sortedAvulsos={sortedAvulsos}
+            toggleMensalista={toggleMensalista}
+            removeMensalista={removeMensalista}
+            todosConfirmados={todosConfirmados}
+            newMensalistaName={newMensalistaName}
+            setNewMensalistaName={setNewMensalistaName}
+            addMensalista={addMensalista}
+            newAvulsoName={newAvulsoName}
+            setNewAvulsoName={setNewAvulsoName}
+            addAvulso={addAvulso}
+            toggleAvulso={toggleAvulso}
+            removeAvulso={removeAvulso}
+            limparAvulsos={limparAvulsos}
+            setMensalistaStars={setMensalistaStars}
+            setAvulsoStars={setAvulsoStars}
+          />
+        ) : (
+          <SorteioTab
+            confirmados={confirmados}
+            fazerSorteio={fazerSorteio}
+            result={result}
+            sortearNovamente={sortearNovamente}
+            imageUrl={imageUrl}
+            baixarImagem={baixarImagem}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Jogadores tab ----------
+function JogadoresTab({
+  jogView,
+  setJogView,
+  sortedFixed,
+  sortedAvulsos,
+  toggleMensalista,
+  removeMensalista,
+  todosConfirmados,
+  newMensalistaName,
+  setNewMensalistaName,
+  addMensalista,
+  newAvulsoName,
+  setNewAvulsoName,
+  addAvulso,
+  toggleAvulso,
+  removeAvulso,
+  limparAvulsos,
+  setMensalistaStars,
+  setAvulsoStars,
+}) {
+  if (jogView === "classificar") {
+    return (
+      <ClassificarNivel
+        sortedFixed={sortedFixed}
+        setMensalistaStars={setMensalistaStars}
+        onBack={() => setJogView("lista")}
+      />
+    );
+  }
+
+  if (jogView === "novoMensalista") {
+    return (
+      <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 20, boxShadow: "0 4px 16px rgba(15,46,34,0.08)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <button onClick={() => setJogView("lista")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", color: "#6E6B5D" }}>
+            <ArrowLeft size={18} />
+          </button>
+          <h3 style={{ margin: 0, fontSize: 17 }}>Cadastrar mensalista</h3>
+        </div>
+        <p style={{ fontSize: 13, color: "#6E6B5D", marginTop: 0 }}>
+          Ele entra na lista fixa. Depois é só confirmar presença toda semana — não precisa cadastrar de novo.
+        </p>
+        <input
+          autoFocus
+          value={newMensalistaName}
+          onChange={(e) => setNewMensalistaName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addMensalista()}
+          placeholder="Nome do mensalista"
+          style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #DEDACB", fontSize: 15, outline: "none", boxSizing: "border-box" }}
+        />
+        <button
+          onClick={addMensalista}
+          disabled={!newMensalistaName.trim()}
+          style={{
+            marginTop: 12,
+            width: "100%",
+            background: newMensalistaName.trim() ? "#1F5C3F" : "#C7C3B2",
+            color: "#fff",
+            border: "none",
+            borderRadius: 10,
+            padding: "13px 0",
+            fontWeight: 600,
+            fontSize: 15,
+            cursor: newMensalistaName.trim() ? "pointer" : "default",
+          }}
+        >
+          Salvar mensalista
+        </button>
+      </div>
+    );
+  }
+
+  const confirmedCount = sortedFixed.filter((p) => p.confirmado).length + sortedAvulsos.filter((p) => p.confirmado).length;
+
+  return (
+    <div>
+      {/* Mensalistas */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.5, color: "#6E6B5D" }}>MENSALISTAS</span>
+        <button
+          onClick={todosConfirmados}
+          disabled={sortedFixed.length === 0}
+          style={{
+            background: "none",
+            border: "1px solid #1F5C3F",
+            color: "#1F5C3F",
+            borderRadius: 8,
+            padding: "6px 10px",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: sortedFixed.length === 0 ? "default" : "pointer",
+            opacity: sortedFixed.length === 0 ? 0.4 : 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+          }}
+        >
+          <CheckCheck size={13} /> Todos confirmados
+        </button>
+      </div>
+
+      <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 8, boxShadow: "0 4px 16px rgba(15,46,34,0.08)" }}>
+        {sortedFixed.length === 0 && (
+          <p style={{ textAlign: "center", color: "#9B9784", padding: "20px 10px", fontSize: 14 }}>
+            Nenhum mensalista cadastrado ainda.
+          </p>
+        )}
+        {sortedFixed.map((p, i) => (
+          <div
+            key={p.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "11px 10px",
+              borderBottom: i === sortedFixed.length - 1 ? "none" : "1px solid #F0EEE6",
+            }}
+          >
+            <CheckToggle checked={p.confirmado} onChange={() => toggleMensalista(p.id)} />
+            <span style={{ fontWeight: 600, fontSize: 15, flex: 1, color: p.confirmado ? "#16241D" : "#B4B0A0" }}>{p.name}</span>
+            <button
+              onClick={() => removeMensalista(p.id)}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#C9C5B6", display: "flex", padding: 4 }}
+              aria-label="Remover mensalista"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Avulsos */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 22, marginBottom: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.5, color: "#6E6B5D" }}>AVULSOS DA SEMANA</span>
+        <button
+          onClick={limparAvulsos}
+          disabled={sortedAvulsos.length === 0}
+          style={{
+            background: "none",
+            border: "1px solid #C7C3B2",
+            color: "#8A867A",
+            borderRadius: 8,
+            padding: "6px 10px",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: sortedAvulsos.length === 0 ? "default" : "pointer",
+            opacity: sortedAvulsos.length === 0 ? 0.4 : 1,
+          }}
+        >
+          Limpar avulsos
+        </button>
+      </div>
+
+      <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 8, boxShadow: "0 4px 16px rgba(15,46,34,0.08)" }}>
+        {sortedAvulsos.length === 0 && (
+          <p style={{ textAlign: "center", color: "#9B9784", padding: "20px 10px", fontSize: 14 }}>
+            Nenhum avulso adicionado essa semana.
+          </p>
+        )}
+        {sortedAvulsos.map((p, i) => (
+          <div
+            key={p.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "11px 10px",
+              borderBottom: i === sortedAvulsos.length - 1 ? "none" : "1px solid #F0EEE6",
+            }}
+          >
+            <CheckToggle checked={p.confirmado} onChange={() => toggleAvulso(p.id)} />
+            <span
+              style={{
+                fontWeight: 600,
+                fontSize: 15,
+                flex: 1,
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                color: p.confirmado ? "#16241D" : "#B4B0A0",
+              }}
+            >
+              {p.name}
+            </span>
+            <StarPicker value={p.stars} onChange={(n) => setAvulsoStars(p.id, n)} size={16} />
+            <button
+              onClick={() => removeAvulso(p.id)}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#C9C5B6", display: "flex", padding: 4 }}
+              aria-label="Remover avulso"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 8, padding: "10px 6px 4px" }}>
+          <input
+            value={newAvulsoName}
+            onChange={(e) => setNewAvulsoName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addAvulso()}
+            placeholder="Nome do avulso"
+            style={{ flex: 1, padding: "10px 12px", borderRadius: 9, border: "1px solid #DEDACB", fontSize: 14, outline: "none" }}
+          />
+          <button
+            onClick={addAvulso}
+            style={{ background: "#E7B740", color: "#16241D", border: "none", borderRadius: 9, padding: "0 14px", display: "flex", alignItems: "center", cursor: "pointer" }}
+            aria-label="Adicionar avulso"
+          >
+            <Plus size={17} />
+          </button>
+        </div>
+      </div>
+
+      <p style={{ textAlign: "center", fontSize: 12, color: "#8A867A", marginTop: 10 }}>{confirmedCount} confirmados no total</p>
+
+      {/* action buttons */}
+      <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+        <button
+          onClick={() => setJogView("novoMensalista")}
+          style={{
+            flex: 1,
+            background: "#1F5C3F",
+            color: "#fff",
+            border: "none",
+            borderRadius: 10,
+            padding: "13px 0",
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 7,
+          }}
+        >
+          <Plus size={16} /> Cadastrar mensalista
+        </button>
+        <button
+          onClick={() => setJogView("classificar")}
+          style={{
+            flex: 1,
+            background: "#FFFFFF",
+            color: "#16241D",
+            border: "1px solid #DEDACB",
+            borderRadius: 10,
+            padding: "13px 0",
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 7,
+          }}
+        >
+          <SlidersHorizontal size={16} /> Classificar nível
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Classificar nível (admin only view, só mensalistas) ----------
+function ClassificarNivel({ sortedFixed, setMensalistaStars, onBack }) {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", color: "#6E6B5D" }}>
+          <ArrowLeft size={18} />
+        </button>
+        <h3 style={{ margin: 0, fontSize: 17 }}>Classificar nível</h3>
+      </div>
+      <p style={{ fontSize: 13, color: "#6E6B5D", marginTop: 4, marginBottom: 18 }}>
+        Define o peso de cada mensalista no sorteio. Só você vê essa tela. Avulsos são classificados direto na lista semanal.
+      </p>
+
+      <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.5, color: "#6E6B5D" }}>MENSALISTAS</span>
+      <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 8, boxShadow: "0 4px 16px rgba(15,46,34,0.08)", marginTop: 8 }}>
+        {sortedFixed.length === 0 && <p style={{ textAlign: "center", color: "#9B9784", padding: "16px 10px", fontSize: 14 }}>Nenhum mensalista cadastrado.</p>}
+        {sortedFixed.map((p, i) => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 10px", borderBottom: i === sortedFixed.length - 1 ? "none" : "1px solid #F0EEE6" }}>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>{p.name}</span>
+            <StarPicker value={p.stars} onChange={(n) => setMensalistaStars(p.id, n)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Sorteio tab ----------
+function SorteioTab({ confirmados, fazerSorteio, result, sortearNovamente, imageUrl, baixarImagem }) {
+  if (!result) {
+    return (
+      <div>
+        <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 8, boxShadow: "0 4px 16px rgba(15,46,34,0.08)" }}>
+          {confirmados.length === 0 && (
+            <p style={{ textAlign: "center", color: "#9B9784", padding: "24px 10px", fontSize: 14 }}>
+              Ninguém confirmado ainda. Vá na aba Jogadores e marque quem vai jogar.
+            </p>
+          )}
+          {confirmados.map((p, i) => (
+            <div
+              key={p.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 10px",
+                borderBottom: i === confirmados.length - 1 ? "none" : "1px solid #F0EEE6",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "3px 7px",
+                  borderRadius: 6,
+                  background: p.isAvulso ? "#E4E1D6" : "#FCEDC2",
+                  color: p.isAvulso ? "#6E6B5D" : "#8A6A0A",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {p.isAvulso ? "AVULSO" : "MENSALISTA"}
+              </span>
+              <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>{p.name}</span>
+            </div>
+          ))}
+        </div>
+
+        {confirmados.length > 0 && (
+          <>
+            <p style={{ textAlign: "center", fontSize: 13, color: "#6E6B5D", marginTop: 10 }}>
+              {confirmados.length} confirmados • {Math.floor(confirmados.length / 5)} time(s) de 5, {confirmados.length % 5} de fora
+            </p>
+            <button
+              onClick={fazerSorteio}
+              style={{
+                marginTop: 6,
+                width: "100%",
+                background: "#E7B740",
+                color: "#16241D",
+                border: "none",
+                borderRadius: 10,
+                padding: "13px 0",
+                fontWeight: 700,
+                fontSize: 15,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+              }}
+            >
+              <Shuffle size={18} /> Sortear times
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button
+          onClick={sortearNovamente}
+          style={{
+            flex: 1,
+            background: "#1F5C3F",
+            color: "#fff",
+            border: "none",
+            borderRadius: 10,
+            padding: "12px 0",
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+          }}
+        >
+          <RotateCcw size={15} /> Sortear novamente
+        </button>
+        <button
+          onClick={baixarImagem}
+          style={{
+            flex: 1,
+            background: "#E7B740",
+            color: "#16241D",
+            border: "none",
+            borderRadius: 10,
+            padding: "12px 0",
+            fontWeight: 700,
+            fontSize: 14,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+          }}
+        >
+          <Download size={15} /> Baixar imagem
+        </button>
+      </div>
+
+      {imageUrl && (
+        <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: "0 8px 30px rgba(15,46,34,0.25)" }}>
+          <img src={imageUrl} alt="Sorteio dos times" style={{ width: "100%", display: "block" }} />
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+        <span style={{ fontSize: 12, color: "#6E6B5D", display: "flex", alignItems: "center", gap: 6 }}>
+          <Check size={14} color="#1F5C3F" /> Segure a imagem para salvar e enviar no grupo do WhatsApp
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const rootEl = document.getElementById('root');
+ReactDOM.createRoot(rootEl).render(<App />);
+
+
+</script>
+</body>
+</html>
