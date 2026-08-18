@@ -97,25 +97,29 @@ function drawRoundRect(ctx, x, y, w, h, r) {
 function sortear(list) {
   const shuffled = shuffle(list);
   const sorted = [...shuffled].sort((a, b) => b.stars - a.stars);
-  const numTeams = Math.floor(sorted.length / 5);
-  const totalAssigned = numTeams * 5;
-  const forTeams = sorted.slice(0, totalAssigned);
-  const reservas = sorted.slice(totalAssigned);
+  const n = sorted.length;
+
+  // times de até 5 jogadores; se sobrar gente, forma-se mais um time (menor) em vez de deixar reserva
+  const numTeams = Math.max(1, Math.ceil(n / 5));
+  const targetSizes = Array(numTeams).fill(5);
+  targetSizes[numTeams - 1] = n - 5 * (numTeams - 1);
 
   const teams = Array.from({ length: numTeams }, () => []);
   let round = 0;
   let idx = 0;
-  while (idx < forTeams.length) {
+  while (idx < n) {
     const order = [...Array(numTeams).keys()];
     const teamOrder = round % 2 === 0 ? order : order.reverse();
     for (const t of teamOrder) {
-      if (idx >= forTeams.length) break;
-      teams[t].push(forTeams[idx]);
-      idx++;
+      if (idx >= n) break;
+      if (teams[t].length < targetSizes[t]) {
+        teams[t].push(sorted[idx]);
+        idx++;
+      }
     }
     round++;
   }
-  return { teams, reservas };
+  return { teams };
 }
 
 // ---------- small UI atoms ----------
@@ -287,11 +291,11 @@ function App() {
     return [...m, ...a];
   }, [fixedPlayers, avulsos]);
 
-  function generateImageDataUrl({ teams, reservas }) {
+  function generateImageDataUrl({ teams }) {
     const width = 720;
     const padding = 36;
-    const rowH = 46;
-    const cardHeaderH = 44;
+    const rowH = 52;
+    const cardHeaderH = 46;
     const cardPad = 18;
     const cardGap = 22;
 
@@ -302,14 +306,6 @@ function App() {
     const teamCardHeights = teams.map((t) => cardHeaderH + cardPad * 2 + t.length * rowH);
     const teamsTotalH = teamCardHeights.reduce((a, b) => a + b, 0) + cardGap * teams.length;
     y += teamsTotalH;
-
-    let reservasH = 0;
-    if (reservas.length > 0) {
-      reservasH = cardHeaderH + cardPad * 2 + reservas.length * rowH + cardGap;
-      y += reservasH;
-    }
-    const footerH = 50;
-    y += footerH;
 
     const height = y + padding;
 
@@ -356,70 +352,34 @@ function App() {
       ctx.fillRect(x, cy + cardHeaderH - 14, w, 14);
 
       ctx.fillStyle = "#16241D";
-      ctx.font = "bold 22px Arial Black, Arial, sans-serif";
+      ctx.font = "bold 23px Arial Black, Arial, sans-serif";
       ctx.textAlign = "left";
-      ctx.fillText(`TIME ${ti + 1}`, x + 20, cy + 30);
+      ctx.fillText(`TIME ${ti + 1}`, x + 20, cy + 31);
 
       let ry = cy + cardHeaderH + cardPad;
       team.forEach((p, pi) => {
-        const cx = x + 34;
+        const cx = x + 36;
         const rowMidY = ry + rowH / 2 - 6;
 
         ctx.beginPath();
-        ctx.arc(cx, rowMidY + 2, 16, 0, Math.PI * 2);
+        ctx.arc(cx, rowMidY + 2, 18, 0, Math.PI * 2);
         ctx.fillStyle = "#1F5C3F";
         ctx.fill();
         ctx.fillStyle = "#FFFFFF";
-        ctx.font = "bold 14px Arial, sans-serif";
+        ctx.font = "bold 15px Arial, sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(String(pi + 1), cx, rowMidY + 7);
 
         ctx.fillStyle = "#16241D";
-        ctx.font = "600 19px Arial, sans-serif";
+        ctx.font = "700 23px Arial, sans-serif";
         ctx.textAlign = "left";
-        ctx.fillText(p.name, cx + 30, rowMidY + 6);
+        ctx.fillText(p.name, cx + 32, rowMidY + 7);
 
         ry += rowH;
       });
 
       cy += cardH + cardGap;
     });
-
-    if (reservas.length > 0) {
-      const x = padding;
-      const w = width - padding * 2;
-      const cardH = reservasH - cardGap;
-
-      ctx.fillStyle = "#E4E1D6";
-      drawRoundRect(ctx, x, cy, w, cardH, 14);
-      ctx.fill();
-
-      ctx.fillStyle = "#8A8672";
-      drawRoundRect(ctx, x, cy, w, cardHeaderH, 14);
-      ctx.fill();
-      ctx.fillRect(x, cy + cardHeaderH - 14, w, 14);
-
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = "bold 20px Arial Black, Arial, sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText("RESERVAS", x + 20, cy + 29);
-
-      let ry = cy + cardHeaderH + cardPad;
-      reservas.forEach((p) => {
-        ctx.fillStyle = "#3A382E";
-        ctx.font = "600 18px Arial, sans-serif";
-        ctx.textAlign = "left";
-        ctx.fillText(p.name, x + 24, ry + rowH / 2 + 2);
-        ry += rowH;
-      });
-
-      cy += reservasH;
-    }
-
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
-    ctx.font = "13px Arial, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("gerado automaticamente • sorteio equilibrado por estrelas", width / 2, cy + 20);
 
     return canvas.toDataURL("image/png");
   }
@@ -652,8 +612,33 @@ function JogadoresTab({
   return (
     <div>
       {/* Mensalistas */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.5, color: "#6E6B5D" }}>MENSALISTAS</span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#1F5C3F",
+            padding: "7px 12px",
+            borderRadius: 9,
+          }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.5, color: "#FFFFFF" }}>MENSALISTAS</span>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              color: "#16241D",
+              background: "#E7B740",
+              borderRadius: 6,
+              padding: "1px 7px",
+              minWidth: 18,
+              textAlign: "center",
+            }}
+          >
+            {confirmedCount}
+          </span>
+        </div>
         <button
           onClick={todosConfirmados}
           disabled={sortedFixed.length === 0}
@@ -788,8 +773,6 @@ function JogadoresTab({
         </div>
       </div>
 
-      <p style={{ textAlign: "center", fontSize: 12, color: "#8A867A", marginTop: 10 }}>{confirmedCount} confirmados no total</p>
-
       {/* action buttons */}
       <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
         <button
@@ -908,7 +891,7 @@ function SorteioTab({ confirmados, fazerSorteio, result, sortearNovamente, image
         {confirmados.length > 0 && (
           <>
             <p style={{ textAlign: "center", fontSize: 13, color: "#6E6B5D", marginTop: 10 }}>
-              {confirmados.length} confirmados • {Math.floor(confirmados.length / 5)} time(s) de 5, {confirmados.length % 5} de fora
+              {confirmados.length} confirmados • {Math.ceil(confirmados.length / 5)} time(s) serão formados
             </p>
             <button
               onClick={fazerSorteio}
