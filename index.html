@@ -19,7 +19,7 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-<script type="text/babel" data-presets="react">
+<script type="text/plain" id="app-source">
 const { useState, useEffect, useCallback, useMemo } = React;
 
 // ---------- ícones simples (sem dependência externa) ----------
@@ -1002,5 +1002,17 @@ ReactDOM.createRoot(rootEl).render(<App />);
 
 
 </script>
+
+<script>
+  var srcCode = document.getElementById('app-source').textContent;
+  var output = Babel.transform(srcCode, {
+    presets: [["react", { runtime: "classic" }]]
+  }).code;
+  var s = document.createElement('script');
+  s.text = output;
+  document.body.appendChild(s);
+</script>
 </body>
 </html>
+
+"corrige babel"
