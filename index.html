@@ -96,37 +96,50 @@ function drawRoundRect(ctx, x, y, w, h, r) {
 
 function sortear(list) {
   const shuffled = shuffle(list);
-  const sorted = [...shuffled].sort((a, b) => b.stars - a.stars);
-  const n = sorted.length;
+  const n = shuffled.length;
 
-  // times de até 5 jogadores; se sobrar gente, forma-se mais um time (menor) em vez de deixar reserva
+  // Times de até 5 jogadores; se sobrar gente, forma-se mais um time menor.
   const numTeams = Math.max(1, Math.ceil(n / 5));
   const targetSizes = Array(numTeams).fill(5);
   targetSizes[numTeams - 1] = n - 5 * (numTeams - 1);
 
+  // Ordem aleatória dos times para evitar que a distribuição fique sempre igual.
+  const teamPriority = shuffle([...Array(numTeams).keys()]);
+
   const teams = Array.from({ length: numTeams }, () => []);
-  let round = 0;
-  let idx = 0;
-  while (idx < n) {
-    const order = [...Array(numTeams).keys()];
-    const teamOrder = round % 2 === 0 ? order : order.reverse();
-    for (const t of teamOrder) {
-      if (idx >= n) break;
-      if (teams[t].length < targetSizes[t]) {
-        teams[t].push(sorted[idx]);
-        idx++;
-      }
-    }
-    round++;
+  const teamStars = Array(numTeams).fill(0);
+
+  // Jogadores mais fortes são distribuídos primeiro.
+  // Jogadores com a mesma quantidade de estrelas continuam em ordem aleatória.
+  const sorted = [...shuffled].sort((a, b) => {
+    const diff = (Number(b.stars) || 0) - (Number(a.stars) || 0);
+    return diff !== 0 ? diff : Math.random() - 0.5;
+  });
+
+  for (const player of sorted) {
+    const available = [...Array(numTeams).keys()]
+      .filter((t) => teams[t].length < targetSizes[t])
+      .sort((a, b) => {
+        if (teamStars[a] !== teamStars[b]) {
+          return teamStars[a] - teamStars[b];
+        }
+        return teamPriority.indexOf(a) - teamPriority.indexOf(b);
+      });
+
+    const team = available[0];
+    teams[team].push(player);
+    teamStars[team] += Number(player.stars) || 0;
   }
-  return { teams };
+
+  // Também varia a ordem visual dos times a cada sorteio.
+  return { teams: shuffle(teams) };
 }
 
 // ---------- small UI atoms ----------
 function StarPicker({ value, onChange, readOnly, size = 20 }) {
   return (
     <div style={{ display: "flex", gap: 2 }}>
-      {[1, 2, 3, 4].map((n) => (
+      {[1, 2, 3, 4, 5].map((n) => (
         <button
           key={n}
           type="button"
